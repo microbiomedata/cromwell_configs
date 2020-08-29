@@ -1,0 +1,133 @@
+include required(classpath("application"))
+
+database {
+  # mysql example
+  # driver = "slick.driver.MySQLDriver$"
+  profile = "slick.jdbc.MySQLProfile$"
+
+  # see all possible parameters and default values here:
+  # http://slick.lightbend.com/doc/3.2.0/api/index.html#slick.jdbc.JdbcBackend$DatabaseFactoryDef@forConfig(String,Config,Driver):Database
+  db {
+    driver = "com.mysql.jdbc.Driver"
+    url = "jdbc:mysql://db-mysql/cromwell?rewriteBatchedStatements=true"
+    user = "cromwell"
+    password = "DB_PASSWORD"
+    connectionTimeout = 5000
+  }
+}
+
+call-caching {
+  enabled = true
+  invalidate-bad-cache-results = true
+}
+
+backend {
+  default = HtCondor
+  providers {
+    JTM {
+      actor-factory = "cromwell.backend.impl.sfs.config.ConfigBackendLifecycleActorFactory"
+      config {
+        runtime-attributes = """
+           String time = "00:00:00"
+           Int cpu = 1
+           String? docker
+           String mem = "0G"
+           String cluster = "cori"
+           String poolname = "small"
+           Int node = 1
+           Int nwpn = 1
+           Int shared = 1
+           String constraint = "haswell"
+           String account = "m3408"
+           """
+
+        submit = "jtm submit -cmd '/bin/bash ${script}' -cl ${cluster} -p ${poolname} --shared ${shared}"
+        kill = "jtm kill ${job_id}"
+        check-alive = "jtm isalive ${job_id}"
+        job-id-regex = "JTM task ID (\\d+)"
+        # Submit string when there is a "docker" runtime attribute.
+        submit-docker = """
+            jtm submit -cmd 'shifter_exec.sh ${docker} ${job_shell} ${script}' \
+                -cl ${cluster} -p ${poolname} --shared ${shared}
+        """
+
+        # Root directory where Cromwell writes job results in the container. This value
+        # can be used to specify where the execution folder is mounted in the container.
+        # it is used for the construction of the docker_cwd string in the submit-docker
+        # value above AND in the generation of the "script" file.
+        # dockerRoot = /global/cscratch1/sd/scanon/cromwell-executions
+      }
+    }
+
+    HtCondor {
+      actor-factory = "cromwell.backend.impl.sfs.config.ConfigBackendLifecycleActorFactory"
+      config {
+        runtime-attributes = """
+          Int cpu = 1
+          Float memory_mb = 512.0
+          Float disk_kb = 256000.0
+          String? nativeSpecs
+          String? docker
+        """
+
+        # If an 'exit-code-timeout-seconds' value is specified:
+        # - check-alive will be run at this interval for every job
+        # - if a job is found to be not alive, and no RC file appears after this interval
+        # - Then it will be marked as Failed.
+        # Warning: If set, Cromwell will run 'check-alive' for every job at this interval
+
+        # exit-code-timeout-seconds = 120
+
+        submit = """
+          chmod 755 ${script}
+          cat > ${cwd}/execution/submitFile <<EOF
+          Iwd=${cwd}/execution
+          requirements=${nativeSpecs}
+          leave_in_queue=true
+          request_memory=${memory_mb}
+          request_disk=${disk_kb}
+          error=${err}
+          output=${out}
+          log_xml=true
+          request_cpus=${cpu}
+          executable=${script}
+          log=${cwd}/execution/execution.log
+          queue
+          EOF
+          condor_submit ${cwd}/execution/submitFile
+        """
+
+        submit-docker = """
+          chmod 755 ${script}
+          cat > ${cwd}/execution/dockerScript <<EOF
+          #!/bin/bash
+          PATH=/global/common/software/m3408/cromwell:$PATH
+          shifter_exec.sh ${docker} ${job_shell} ${script}
+          EOF
+          chmod 755 ${cwd}/execution/dockerScript
+          cat > ${cwd}/execution/submitFile <<EOF
+          Iwd=${cwd}/execution
+          +Owner=UNDEFINED
+          requirements=${nativeSpecs}
+          leave_in_queue=true
+          request_memory=${memory_mb}
+          request_disk=${disk_kb}
+          error=${cwd}/execution/stderr
+          output=${cwd}/execution/stdout
+          log_xml=true
+          request_cpus=${cpu}
+          executable=${cwd}/execution/dockerScript
+          log=${cwd}/execution/execution.log
+          queue
+          EOF
+          condor_submit ${cwd}/execution/submitFile
+        """
+
+        kill = "condor_rm ${job_id}"
+        check-alive = "condor_q ${job_id}"
+        job-id-regex = "(?sm).*cluster (\\d+)..*"
+      }
+    }
+  }
+}
+

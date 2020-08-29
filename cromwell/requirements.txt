@@ -1,0 +1,11 @@
+numpy
+pika==1.1.0
+#sqlalchemy==1.2.12
+psutil==5.4.7
+shortuuid==0.5.0
+#mysqlclient
+#mysql-connector
+#MySQL-python
+#mysql-python
+cryptography
+MySQL-connector-python
