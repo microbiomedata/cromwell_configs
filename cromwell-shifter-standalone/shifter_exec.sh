@@ -1,17 +1,19 @@
 #!/bin/bash
-CACHE=/global/common/software/m3408/cromwell/cache
-
-if [ $(echo $1|grep -c sha256) -gt 0 ] ; then
-  ID="id:$(grep $1 $CACHE|awk '{print $2}')"
-else
-  ID=$1
-  # shifterimg pull $1
-fi
-
-CE=/global/cfs/projectdirs/m3408/aim2/cromwell/cromwell-executions/
-CE=/global/cfs/cdirs/m3408/aim2/mg_annotation/test/cromwell-executions/
-
+# This should point to the location of any reference
+# databases.  This will be mounted as /refdata in the container.
+#
 RD=/global/cfs/projectdirs/m3408/aim2/database/
 
-shifter --image=$ID -V $CE:/cromwell-executions -V $RD:/refdata $2 $3
+IMG=$1
+
+if [ $(echo ${IMG}|grep -c sha256) -gt 0 ] ; then
+	ID=id:$(pull_by_id ${IMG})
+	echo $ID
+else
+	ID=$1
+fi
+
+# Debug
+#printenv > ~/crom.deb
+shifter --image=$ID -V `pwd`/cromwell-executions:/cromwell-executions -V $RD:/refdata $2 $3
 
